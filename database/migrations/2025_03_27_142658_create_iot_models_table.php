@@ -15,8 +15,8 @@ return new class extends Migration
             $table->id();
             $table->string("device_id");
             $table->string("device_name");
-            $table->string("latitude");
-            $table->string("longitude");
+            $table->float("latitude");
+            $table->float("longitude");
             $table->string("api_token")->nullable();
             $table->float("sensor_height")->nullable();
             $table->float("warning_level")->nullable();

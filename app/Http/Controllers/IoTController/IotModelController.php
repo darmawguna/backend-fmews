@@ -20,10 +20,15 @@ class IotModelController extends Controller
      */
     public function index()
     {
-        $iotData = IotModel::paginate(10);
+        $iotData = IotModel::all();
         return new IoTWaterlevelResources(true, 'Data IoT Berhasil Ditemukan!', $iotData);
     }
-    
+
+    public function getAll()
+    {
+        $iotData = IotModel::paginate(15);
+        return new IoTWaterlevelResources(true, 'Data IoT Berhasil Ditemukan!', $iotData);
+    }
 
     /**
      * Store a newly created resource in storage.
@@ -70,8 +75,8 @@ class IotModelController extends Controller
         return new IoTWaterlevelResources(true, 'Iot Data is Found!', $device);
     }
 
-    public function verify($id) {
-        // dd($id);
+    public function verify($id)
+    {
         $device = IotModel::where('device_id', $id)
             ->first();
 
