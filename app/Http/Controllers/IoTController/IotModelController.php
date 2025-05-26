@@ -3,20 +3,30 @@
 namespace App\Http\Controllers\IotController;
 
 use App\Http\Controllers\Controller;
+use App\Models\IotDeviceToken;
 use App\Models\IotModel;
 use App\Http\Requests\StoreIotModelRequest;
 use App\Http\Requests\UpdateIotModelRequest;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 use App\Http\Resources\IoTWaterlevelResources;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
+use Carbon\Carbon;
 
 class IotModelController extends Controller
 {
+
     /**
-     * Display a listing of the resource.
+     * Retrieve all IoT models.
+     *
+     * This method fetches all IoT model data without any conditions applied. The
+     * IoT data is returned wrapped in a IoTWaterlevelResources object.
+     *
+     * @return IoTWaterlevelResources
      */
     public function index()
     {
@@ -24,22 +34,39 @@ class IotModelController extends Controller
         return new IoTWaterlevelResources(true, 'Data IoT Berhasil Ditemukan!', $iotData);
     }
 
+    /**
+     * Retrieve all IoT models with pagination.
+     *
+     * This method fetches IoT model data with pagination applied. The paginated 
+     * IoT data is returned wrapped in a IoTWaterlevelResources object.
+     *
+     * @return IoTWaterlevelResources
+     */
+
     public function getAll()
     {
-        $iotData = IotModel::paginate(15);
+        // $iotData = IotModel::paginate(1);
+        $perPage = request()->input('perPage', 10);
+        // TODO perbarui filter untuk lebih fleksibel. Source : https://www.youtube.com/watch?v=8hhaAsRFAJs&list=PLFIM0718LjIW1Xb7cVj7LdAr32ATDQMdr&index=16
+        $iotData = IotModel::filter()->paginate(perPage: $perPage);
         return new IoTWaterlevelResources(true, 'Data IoT Berhasil Ditemukan!', $iotData);
     }
 
     /**
      * Store a newly created resource in storage.
      */
-    public function store(Request $request)
+    // TODO: gunakan package shpjs untuk parsing shapefile to geojson. https://www.npmjs.com/package/shpjs
+    // TODO: tambahkan logic untuk generate alamat berdasarkan latitude dan longitude
+    public function createDevice(Request $request)
     {
         $validator = Validator::make($request->all(), [
             'device_name' => 'required',
             'latitude' => 'required',
             'longitude' => 'required',
-            'status' => 'required|in:active,deactive',
+            'location' => 'required',
+            'warning_level' => 'required|numeric',
+            'danger_level' => 'required|numeric',
+            'sensor_height' => 'required|numeric',
         ]);
 
         if ($validator->fails()) {
@@ -51,12 +78,130 @@ class IotModelController extends Controller
             'device_name' => $request->device_name,
             'latitude' => $request->latitude,
             'longitude' => $request->longitude,
-            'status' => $request->status,
+            "location" => $request->location,
+            "warning_level" => $request->warning_level,
+            "danger_level" => $request->danger_level,
+            "sensor_height" => $request->sensor_height,
         ]);
-
         return new IoTWaterlevelResources(true, 'Data IoT Berhasil Ditambahkan!', $iotDevice);
     }
 
+    /**
+     * Generate a one-time token for device registration.
+     *
+     * This method generates a one-time token for device registration. The token is
+     * unique and will expire in 10 minutes.
+     *
+     * @param Request $request Request object containing header and body of the request.
+     *
+     * @return \Illuminate\Http\JsonResponse A JSON response containing the generated token.
+     */
+    public function generateToken(Request $request)
+    {
+        // Validasi input
+        $validator = Validator::make($request->all(), [
+            'device_id' => 'required|string|exists:iot_devices,device_id',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation error.',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        try {
+            // Ambil device
+            $device = IotModel::where('device_id', $request->device_id)->first();
+
+            // Buat token
+            $token = Str::random(40); // random versi string
+
+            $tokenData = IotDeviceToken::create([
+                'device_token' => $token,
+                'device_id' => $device->device_id,
+                'expired_at' => Carbon::now()->addMinutes(10),
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Token generated successfully.',
+                'data' => $tokenData
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Token generation failed.',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    public function registerDevice(Request $request)
+    {
+        // Validasi input
+        $request->validate([
+            'device_id' => 'required|string',
+        ]);
+
+        // Cari device berdasarkan device_id
+        $device = IotModel::where('device_id', $request->device_id)->first();
+
+        if (!$device) {
+            return new IoTWaterlevelResources(false, 'IoT Device Not Found!', null, 404);
+        }
+
+        // Cari token yang belum digunakan dan belum expired
+        $validToken = $device->iotDeviceToken()
+            ->whereNull('used_at')
+            ->where('expired_at', '>', Carbon::now())
+            ->first();
+
+        if (!$validToken) {
+            return new IoTWaterlevelResources(false, 'No valid token found for this device.', null, 403);
+        }
+        $payload = [
+            'device_id' => $device->device_id,
+            'warning_level' => $device->warning_level,
+            'danger_level' => $device->danger_level,
+            'sensor_height' => $device->sensor_height,
+            'device_token' => $validToken->device_token,
+        ];
+        $iotServerUrl = env('IOT_SERVER_URL') . '/api/iot/register-device';
+
+        try {
+            $response = Http::timeout(5)->post($iotServerUrl, $payload);
+            // dd($response->json());
+
+            if ($response->successful()) {
+                $validToken->update([
+                    'used_at' => Carbon::now(),
+                    'status' => 'used',
+                ]);
+                $validToken->save();
+                $device->update([
+                    'status' => 'active',
+                ]);
+                $device->save();
+                return new IoTWaterlevelResources(true, 'Device registered successfully.', [
+                    'device' => $device,
+                ]);
+            }
+
+            return new IoTWaterlevelResources(false, 'Failed to send command to IoT Server', null, 404);
+
+        } catch (\Exception $e) {
+            Log::error('IoT Server Error: ' . $e->getMessage());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Unable to connect to IoT Server',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+
+    }
 
 
     /**
@@ -67,9 +212,9 @@ class IotModelController extends Controller
         // dd($id);
         $device = IotModel::where('device_id', $id)
             ->first();
-        
+
         if (!$device) {
-            return new IoTWaterlevelResources(false, 'Iot Not Found!', null,404);
+            return new IoTWaterlevelResources(false, 'Iot Not Found!', null, 404);
         }
         // return response()->json(['message' => 'Device is authorized']);
         return new IoTWaterlevelResources(true, 'Iot Data is Found!', $device);
@@ -84,8 +229,11 @@ class IotModelController extends Controller
             return new IoTWaterlevelResources(false, 'Unathorized!', null, 401);
         }
         // return response()->json(['message' => 'Device is authorized']);
-        return new IoTWaterlevelResources(true, 'Device is authorized!', null
-    );
+        return new IoTWaterlevelResources(
+            true,
+            'Device is authorized!',
+            null
+        );
     }
 
     public function changeStatus($id, Request $request)
@@ -117,13 +265,35 @@ class IotModelController extends Controller
         );
     }
 
+    public function whitelistDevice()
+    {
+        // Mengambil semua device dari model IotModel
+        $devices = IotModel::all(); // Gunakan all() untuk mengambil semua data
+
+        // Memeriksa apakah ada device yang ditemukan
+        if ($devices->isEmpty()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No devices found.',
+            ], 404);
+        }
+
+        // Mengambil device_id dari setiap device dan menyimpannya dalam array
+        $deviceIds = $devices->pluck('device_id')->toArray();
+        return response()->json([
+            'device_ids' => $deviceIds, // Mengembalikan array device_id
+            'status' => "success",
+            'message' => 'Whitelist device functionality is not implemented yet.',
+        ]);
+    }
 
     /**
      * Update the specified resource in storage.
      */
+    // TODO : tambahkan logic untuk update data device
     public function update(UpdateIotModelRequest $request, IotModel $iotModel)
     {
-        
+
     }
 
     /**

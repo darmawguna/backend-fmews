@@ -11,18 +11,17 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('iot_waterlevel_devices', function (Blueprint $table) {
+        Schema::create('iot_devices', function (Blueprint $table) {
             $table->id();
             $table->string("device_id");
             $table->string("device_name");
+            $table->string("location")->nullable();
             $table->float("latitude");
             $table->float("longitude");
-            $table->string("api_token")->nullable();
             $table->float("sensor_height")->nullable();
             $table->float("warning_level")->nullable();
             $table->float("danger_level")->nullable();
-            $table->enum("status", ["active", "deactive",]);
-            $table->longText('public_key')->nullable();
+            $table->enum("status", ["active", "deactive", "pending",])->default("pending");
             $table->timestamps();
             $table->softDeletes();
         });
