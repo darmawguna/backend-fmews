@@ -43,6 +43,15 @@ class IotModelController extends Controller
      * @return IoTWaterlevelResources
      */
 
+    /**
+     * Retrieve all IoT models with pagination.
+     *
+     * This method fetches IoT model data with pagination applied. The paginated 
+     * IoT data is returned wrapped in a IoTWaterlevelResources object.
+     *
+     * @param int $perPage The number of items to show per page. Defaults to 10.
+     * @return IoTWaterlevelResources
+     */
     public function getAll()
     {
         // $iotData = IotModel::paginate(1);
@@ -236,6 +245,14 @@ class IotModelController extends Controller
         );
     }
 
+    /**
+     * Update the specified resource in storage.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @param  int  $id
+     * @return \App\Http\Resources\IoTWaterlevelResources
+     */
+
     public function changeStatus($id, Request $request)
     {
         $device = IotModel::where('device_id', $id)->first();
@@ -265,6 +282,13 @@ class IotModelController extends Controller
         );
     }
 
+    /**
+     * Return a list of whitelisted device IDs.
+     * 
+     * This functionality is not implemented yet.
+     * 
+     * @return \Illuminate\Http\JsonResponse
+     */
     public function whitelistDevice()
     {
         // Mengambil semua device dari model IotModel
@@ -291,10 +315,31 @@ class IotModelController extends Controller
      * Update the specified resource in storage.
      */
     // TODO : tambahkan logic untuk update data device
-    public function update(UpdateIotModelRequest $request, IotModel $iotModel)
+    public function update(Request $request, $id)
     {
+        $device = IotModel::where('device_id', $id)->first();
 
+        if (!$device) {
+            return new IoTWaterlevelResources(false, 'Device not found.', null, 404);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'device_name' => 'sometimes|string|max:255',
+            'latitude' => 'sometimes|numeric',
+            'longitude' => 'sometimes|numeric',
+            'location' => 'sometimes|string',
+            'status' => ['sometimes', 'string', Rule::in(['active', 'deactive'])],
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json($validator->errors(), 422);
+        }
+
+        $device->update($validator->validated());
+
+        return new IoTWaterlevelResources(true, 'Device updated successfully.', $device);
     }
+
 
     /**
      * Remove the specified resource from storage.
