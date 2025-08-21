@@ -3,12 +3,13 @@
 namespace Database\Factories;
 
 use Illuminate\Database\Eloquent\Factories\Factory;
+use App\Models\IotModel;
 use Illuminate\Support\Str;
 
 /**
  * @extends \Illuminate\Database\Eloquent\Factories\Factory<\App\Models\IotModel>
  */
-class IotModelFactory extends Factory
+class IotFactory extends Factory
 {
     // protected $model = IotModel::class;
 

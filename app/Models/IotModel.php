@@ -37,6 +37,13 @@ class IotModel extends Model
 
     public function scopeFilter(Builder $query): void
     {
+        if (request()->has('search')) {
+            $search = request()->input('search');
+            $query->where(function ($q) use ($search) {
+                $q->where('device_name', 'like', "%{$search}%")
+                    ->orWhere('location', 'like', "%{$search}%");
+            });
+        }
 
         if (request()->has('device_name')) {
             $query->where('device_name', 'like', '%' . request()->device_name . '%');

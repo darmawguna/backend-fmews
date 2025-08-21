@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 
 use App\Http\Resources\IoTWaterlevelResources;
 use Illuminate\Support\Facades\Validator;
@@ -211,6 +212,164 @@ class IotModelController extends Controller
         }
 
     }
+    // TODO buat scheduler untuk mengecek mengubah status token ketika waktu expired
+
+    /**
+     * Membuat, menghasilkan token, dan mendaftarkan perangkat ke IoT Gateway dalam satu proses.
+     */
+    public function createAndRegisterDevice(Request $request)
+    {
+        // 1. Validasi Input Awal
+        $validator = Validator::make($request->all(), [
+            'device_name' => 'required|string|max:255',
+            'latitude' => 'required|numeric',
+            'longitude' => 'required|numeric',
+            'location' => 'required|string',
+            'warning_level' => 'required|numeric',
+            'danger_level' => 'required|numeric',
+            'sensor_height' => 'required|numeric',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+        }
+
+        $device = null;
+        $tokenData = null;
+
+        try {
+            DB::transaction(function () use ($request, &$device, &$tokenData) {
+                $device = IotModel::create([
+                    'device_id' => Str::uuid(),
+                    'device_name' => $request->device_name,
+                    'latitude' => $request->latitude,
+                    'longitude' => $request->longitude,
+                    "location" => $request->location,
+                    "warning_level" => $request->warning_level,
+                    "danger_level" => $request->danger_level,
+                    "sensor_height" => $request->sensor_height,
+                    'status' => 'pending', // Status awal
+                ]);
+
+                // Buat token untuk device baru
+                $tokenData = IotDeviceToken::create([
+                    'device_token' => Str::random(40),
+                    'device_id' => $device->device_id,
+                    'expired_at' => Carbon::now()->addMinutes(10),
+                ]);
+            });
+
+            $payload = [
+                'device_id' => $device->device_id,
+                'warning_level' => $device->warning_level,
+                'danger_level' => $device->danger_level,
+                'sensor_height' => $device->sensor_height,
+                'device_token' => $tokenData->device_token,
+            ];
+
+            $iotServerUrl = env('IOT_SERVER_URL') . '/api/iot/register-device';
+            $response = Http::timeout(10)->post($iotServerUrl, $payload);
+
+            // 4. Proses respons dari Gateway
+            if ($response->successful()) {
+                // Jika berhasil, update status device dan token
+                $device->update(['status' => 'active']);
+                $tokenData->update(['used_at' => Carbon::now(), 'status' => 'used']);
+
+                return new IoTWaterlevelResources(true, 'Perangkat berhasil dibuat dan didaftarkan!', [
+                    'device' => $device,
+                    'token' => $tokenData->device_token // Kirim token agar user bisa simpan
+                ]);
+            }
+
+
+            // Jika GAGAL, beri tahu user tapi jangan hapus data yang sudah dibuat
+            return response()->json([
+                'success' => false,
+                'message' => 'Perangkat dibuat tetapi gagal mendaftar ke IoT Server. Silakan coba lagi.',
+                'data' => [
+                    'device' => $device,
+                    'token' => $tokenData->device_token
+                ]
+            ], 400); // Bad Request or appropriate error code
+
+        } catch (\Exception $e) {
+            Log::error('Device Registration Failed: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Terjadi kesalahan internal saat mendaftarkan perangkat.',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Endpoint untuk mencoba ulang registrasi ke IoT Gateway jika sebelumnya gagal.
+     */
+    public function retryRegistration(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'device_id' => 'required|string|exists:iot_devices,device_id',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+        }
+        // Cari device berdasarkan device_id
+        $device = IotModel::where('device_id', $request->device_id)->first();
+
+        if (!$device) {
+            return new IoTWaterlevelResources(false, 'IoT Device Not Found!', null, 404);
+        }
+
+        // Cari token yang belum digunakan dan belum expired
+        $validToken = $device->iotDeviceToken()
+            ->whereNull('used_at')
+            ->where('expired_at', '>', Carbon::now())
+            ->first();
+
+        if (!$validToken) {
+            return new IoTWaterlevelResources(false, 'No valid token found for this device.', null, 403);
+        }
+        $payload = [
+            'device_id' => $device->device_id,
+            'warning_level' => $device->warning_level,
+            'danger_level' => $device->danger_level,
+            'sensor_height' => $device->sensor_height,
+            'device_token' => $validToken->device_token,
+        ];
+        $iotServerUrl = env('IOT_SERVER_URL') . '/api/iot/register-device';
+
+        try {
+            $response = Http::timeout(5)->post($iotServerUrl, $payload);
+            // dd($response->json());
+            if ($response->successful()) {
+                $validToken->update([
+                    'used_at' => Carbon::now(),
+                    'status' => 'used',
+                ]);
+                $validToken->save();
+                $device->update([
+                    'status' => 'active',
+                ]);
+                $device->save();
+                return new IoTWaterlevelResources(true, 'Device registered successfully.', [
+                    'device' => $device,
+                ]);
+            }
+
+            return new IoTWaterlevelResources(false, 'Failed to send command to IoT Server', null, 404);
+
+        } catch (\Exception $e) {
+            Log::error('IoT Server Error: ' . $e->getMessage());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Unable to connect to IoT Server',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
 
 
     /**
@@ -292,7 +451,7 @@ class IotModelController extends Controller
     public function whitelistDevice()
     {
         // Mengambil semua device dari model IotModel
-        $devices = IotModel::all(); // Gunakan all() untuk mengambil semua data
+        $devices = IotModel::where('status', 'active')->get(); // Gunakan all() untuk mengambil semua data
 
         // Memeriksa apakah ada device yang ditemukan
         if ($devices->isEmpty()) {
@@ -314,7 +473,6 @@ class IotModelController extends Controller
     /**
      * Update the specified resource in storage.
      */
-    // TODO : tambahkan logic untuk update data device
     public function update(Request $request, $id)
     {
         $device = IotModel::where('device_id', $id)->first();
@@ -362,5 +520,54 @@ class IotModelController extends Controller
             'Device soft deleted successfully!',
             null
         );
+    }
+
+    public function getDashboardStats()
+    {
+        try {
+            // Hitung total perangkat
+
+            $totalDevices = IotModel::count();
+            // dd($totalDevices);
+
+            // Hitung perangkat berdasarkan status 'active' atau 'deactive'
+            $activeDevices = IotModel::where('status', 'active')->count();
+            // dd($activeDevices);
+            $inactiveDevices = IotModel::where('status', 'deactive')->count();
+
+
+            // Asumsi: Anda memiliki cara untuk menentukan level bahaya.
+            // Contoh di bawah ini mengasumsikan ada kolom 'last_water_level' dan 'danger_level' di tabel Anda.
+            // Anda perlu menyesuaikan query ini dengan logika bisnis Anda yang sebenarnya.
+            // $alertingDevices = IotModel::where('status', 'active')
+            //     ->whereRaw('last_water_level >= danger_level')
+            //     ->count();
+
+            // $warningDevices = IotModel::where('status', 'active')
+            //     ->whereRaw('last_water_level >= warning_level AND last_water_level < danger_level')
+            //     ->count();
+
+            $stats = [
+                'totalDevices' => $totalDevices,
+                'activeDevices' => $activeDevices,
+                'inactiveDevices' => $inactiveDevices,
+                // 'alertingDevices' => $alertingDevices + $warningDevices, // Total yang bermasalah
+                // 'dangerCount' => $alertingDevices,
+                // 'warningCount' => $warningDevices
+            ];
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Dashboard statistics fetched successfully.',
+                'data' => $stats
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to fetch dashboard stats: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Could not retrieve dashboard statistics.'
+            ], 500);
+        }
     }
 }

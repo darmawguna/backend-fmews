@@ -12,60 +12,72 @@ use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable implements JWTSubject
 {
-    /** @use HasFactory<\Database\Factories\UserFactory> */
     use HasApiTokens, HasFactory, Notifiable;
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var list<string>
-     */
+    // Role constants
+    private const ROLE_ADMINISTRATOR = 'administrator';
+    private const ROLE_PETUGAS = 'petugas';
+
     protected $fillable = [
         'name',
         'email',
         'password',
+        'role',
+        'is_active',
+        'created_by', // Track siapa yang membuat user ini
     ];
 
-    /**
-     * The attributes that should be hidden for serialization.
-     *
-     * @var list<string>
-     */
     protected $hidden = [
         'password',
         'remember_token',
     ];
 
-    /**
-     * Get the attributes that should be cast.
-     *
-     * @return array<string, string>
-     */
     protected function casts(): array
     {
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'is_active' => 'boolean',
         ];
     }
+    public function getRole(): string
+    {
+        return $this->role;
+    }
 
-    /**
-     * Get the identifier that will be stored in the subject claim of the JWT.
-     *
-     * @return mixed
-     */
     public function getJWTIdentifier()
     {
         return $this->getKey();
     }
 
-    /**
-     * Return a key value array, containing any custom claims to be added to the JWT.
-     *
-     * @return array
-     */
     public function getJWTCustomClaims()
     {
-        return [];
+        return [
+            'role' => $this->role,
+            'email' => $this->email,
+            'is_active' => $this->is_active
+        ];
+    }
+
+    // Helper methods untuk role checking
+    public function isAdministrator()
+    {
+        return $this->role === self::ROLE_ADMINISTRATOR;
+    }
+
+    public function isPetugas()
+    {
+        return $this->role === self::ROLE_PETUGAS;
+    }
+
+    // Relationship: User yang dibuat oleh administrator
+    public function creator()
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function createdUsers()
+    {
+        return $this->hasMany(User::class, 'created_by');
     }
 }

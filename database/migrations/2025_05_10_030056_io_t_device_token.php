@@ -13,7 +13,7 @@ return new class extends Migration
     {
         Schema::create('iot_device_tokens', function (Blueprint $table) {
             $table->id();
-            $table->string('device_id')->unique();
+            $table->string('device_id');
             $table->string('device_token')->unique();
             $table->enum('status', ['unused', 'used', 'expired'])->default('unused');
             $table->timestamp('used_at')->nullable();

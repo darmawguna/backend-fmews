@@ -4,8 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-return new class extends Migration
-{
+return new class extends Migration {
     /**
      * Run the migrations.
      */
@@ -15,25 +14,15 @@ return new class extends Migration
             $table->id();
             $table->string('name');
             $table->string('email')->unique();
+            $table->enum('role', ['administrator', 'petugas'])->default('petugas');
+            $table->boolean('is_active')->default(true);
+            $table->foreignId('created_by')->nullable()->constrained('users')->nullOnDelete();
             $table->timestamp('email_verified_at')->nullable();
             $table->string('password');
-            $table->rememberToken();
             $table->timestamps();
-        });
 
-        Schema::create('password_reset_tokens', function (Blueprint $table) {
-            $table->string('email')->primary();
-            $table->string('token');
-            $table->timestamp('created_at')->nullable();
-        });
-
-        Schema::create('sessions', function (Blueprint $table) {
-            $table->string('id')->primary();
-            $table->foreignId('user_id')->nullable()->index();
-            $table->string('ip_address', 45)->nullable();
-            $table->text('user_agent')->nullable();
-            $table->longText('payload');
-            $table->integer('last_activity')->index();
+            // Index bisa didefinisikan di akhir untuk kerapian
+            $table->index(['role', 'is_active']);
         });
     }
 
@@ -42,8 +31,16 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('users');
-        Schema::dropIfExists('password_reset_tokens');
-        Schema::dropIfExists('sessions');
+        // down() method Anda sudah benar, namun lebih aman untuk
+        // membungkusnya dalam Schema::table()
+        Schema::table('users', function (Blueprint $table) {
+            // Urutan drop: index dan foreign key dulu, baru kolom.
+            $table->dropForeign(['created_by']);
+            $table->dropIndex(['users_role_is_active_index']); // Nama index default
+            $table->dropColumn(['role', 'is_active', 'created_by']);
+        });
+
+        // Alternatif jika ingin menghapus seluruh tabel saat rollback
+        // Schema::dropIfExists('users');
     }
 };
