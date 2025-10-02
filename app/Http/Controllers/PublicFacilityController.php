@@ -2,31 +2,46 @@
 
 namespace App\Http\Controllers;
 
+// TODO coba implementasiin redis untuk caching
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StorePublicFacilityRequest;
 use App\Models\PublicFacility;
 use Illuminate\Http\Request;
 use App\Http\Resources\ApiResponse;
-use Illuminate\Support\Facades\Validator;
-use Illuminate\Validation\Rule;
 
 class PublicFacilityController extends Controller
 {
     /**
-     * Menampilkan daftar fasilitas publik dengan paginasi.
+     * Menampilkan daftar fasilitas publik dengan paginasi dan pencarian.
+     *
+     * @param Request $request
+     * @return ApiResponse
      */
-    public function index()
+    public function index(Request $request)
     {
-        // Eager loading relasi 'kategori' untuk efisiensi query
-        $fasilitas = PublicFacility::with('kategori')->latest()->paginate(10);
+        $filters = $request->only([
+            'search',
+            'nama_fasilitas',
+            'status_operasional',
+            'alamat',
+            'id_kategori'
+        ]);
+
+        $perPage = $request->input('perPage', 10); // Default 10
+
+        $fasilitas = PublicFacility::with('kategori')
+            ->filter($filters)
+            ->latest()
+            ->paginate($perPage)
+            ->appends($request->query()); // Pertahankan parameter di pagination
+
         return new ApiResponse(true, 'Data Fasilitas Publik Berhasil Ditemukan!', $fasilitas);
     }
 
-    /**
-     * Menyimpan fasilitas publik baru.
-     */
+
     public function store(StorePublicFacilityRequest $request)
     {
+        // dd($request);
         try {
             $validated = $request->validated();
             $fasilitas = PublicFacility::create($validated);
@@ -38,29 +53,28 @@ class PublicFacilityController extends Controller
 
     /**
      * Menampilkan detail satu fasilitas publik.
+     *
+     * @param int $id
+     * @return ApiResponse
      */
     public function show($id)
     {
         $publicFacility = PublicFacility::with('kategori')->findOrFail($id);
-        // Cek apakah fasilitas publik ditemukan
-        if (!$publicFacility) {
-            return response()->json(['error' => 'Data Fasilitas Publik Tidak Ditemukan!'], 404);
-        }
-        // Muat relasi kategori saat menampilkan detail
-        return new ApiResponse(true, 'Data Fasilitas Publik Ditemukan!', $publicFacility->load('kategori'));
+        return new ApiResponse(true, 'Data Fasilitas Publik Ditemukan!', $publicFacility);
     }
 
     /**
      * Memperbarui data fasilitas publik.
+     *
+     * @param Request $request
+     * @param int $id
+     * @return ApiResponse
      */
     public function update(Request $request, $id)
     {
         $publicFacility = PublicFacility::findOrFail($id);
-        // Cek apakah fasilitas publik ditemukan
-        if (!$publicFacility) {
-            return response()->json(['error' => 'Data Fasilitas Publik Tidak Ditemukan!'], 404);
-        }
-        $validator = Validator::make($request->all(), [
+
+        $validated = $request->validate([
             'id_kategori' => 'sometimes|required|exists:kategori_fasilitas,id',
             'nama_fasilitas' => 'sometimes|required|string|max:255',
             'alamat' => 'sometimes|required|string',
@@ -70,21 +84,39 @@ class PublicFacilityController extends Controller
             'status_operasional' => 'sometimes|required|string|max:50',
         ]);
 
-        if ($validator->fails()) {
-            return response()->json($validator->errors(), 422);
-        }
-
-        $publicFacility->update($validator->validated());
+        $publicFacility->update($validated);
 
         return new ApiResponse(true, 'Data Fasilitas Publik Berhasil Diperbarui!', $publicFacility->load('kategori'));
     }
 
     /**
      * Menghapus data fasilitas publik.
+     *
+     * @param PublicFacility $publicFacility
+     * @return ApiResponse
      */
     public function destroy(PublicFacility $publicFacility)
     {
         $publicFacility->delete();
         return new ApiResponse(true, 'Data Fasilitas Publik Berhasil Dihapus!', null);
+    }
+
+    /**
+     * Menampilkan statistik fasilitas publik (untuk summary card).
+     *
+     * @return ApiResponse
+     */
+    public function stats()
+    {
+        $stats = PublicFacility::selectRaw('status_operasional, count(*) as count')
+            ->groupBy('status_operasional')
+            ->pluck('count', 'status_operasional');
+
+        return new ApiResponse(true, 'Statistik Fasilitas Publik Ditemukan!', [
+            'total' => PublicFacility::count(),
+            'beroperasi' => $stats->get('Beroperasi', 0),
+            'tutup' => $stats->get('Tutup', 0),
+            'maintenance' => $stats->get('Maintenance', 0),
+        ]);
     }
 }

@@ -7,12 +7,12 @@ use Tymon\JWTAuth\Contracts\JWTSubject;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
-use Laravel\Sanctum\HasApiTokens;
+// use Laravel\Sanctum\HasApiTokens;
 
 
 class User extends Authenticatable implements JWTSubject
 {
-    use HasApiTokens, HasFactory, Notifiable;
+    use HasFactory, Notifiable;
 
     // Role constants
     private const ROLE_ADMINISTRATOR = 'administrator';
@@ -79,5 +79,10 @@ class User extends Authenticatable implements JWTSubject
     public function createdUsers()
     {
         return $this->hasMany(User::class, 'created_by');
+    }
+
+    public function hasRole($role)
+    {
+        return $this->role === $role;
     }
 }

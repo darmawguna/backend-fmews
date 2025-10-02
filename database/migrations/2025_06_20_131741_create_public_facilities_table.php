@@ -20,6 +20,7 @@ return new class extends Migration
             $table->decimal('longitude', 11, 8); // Presisi untuk koordinat
             $table->text('deskripsi')->nullable();
             $table->string('status_operasional')->default('Beroperasi');
+            $table->softDeletes();
             $table->timestamps();
         });
     }
