@@ -101,8 +101,7 @@ return [
     |
     */
 
-    'ttl' => env('JWT_TTL', 60),
-
+    'ttl' => (int) env('JWT_TTL', 60),
     /*
     |--------------------------------------------------------------------------
     | Refresh time to live
@@ -296,6 +295,13 @@ return [
 
         'storage' => Tymon\JWTAuth\Providers\Storage\Illuminate::class,
 
+    ],
+
+    'token_parsers' => [
+        Tymon\JWTAuth\Http\Parser\AuthHeaders::class,
+        Tymon\JWTAuth\Http\Parser\Cookies::class, // <-- PASTIKAN BARIS INI ADA
+        Tymon\JWTAuth\Http\Parser\QueryString::class,
+        Tymon\JWTAuth\Http\Parser\InputSource::class,
     ],
 
 ];

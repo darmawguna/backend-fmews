@@ -1,10 +1,9 @@
 <?php
 
-use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\AuthController;
 use App\Http\Controllers\FacilityCategoryController;
 use App\Http\Controllers\IotController\IotCommandController;
 use App\Http\Controllers\IotController\IotModelController;
-
 use App\Http\Controllers\PublicFacilityController;
 use App\Http\Controllers\ShelterController;
 use App\Http\Middleware\RoleMiddleware;
@@ -15,9 +14,6 @@ use Illuminate\Http\Request;
 
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login'])->name('login');
-// Route::get('/logout', [AuthController::class, 'logout']);
-// Route::get('/refresh', [AuthController::class, 'refresh']);
-// Route::get('/user-profile', [AuthController::class, 'userProfile'])->middleware('auth:api');
 
 
 Route::group(['middleware' => ['auth:api']], function () {
